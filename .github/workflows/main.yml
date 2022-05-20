@@ -6,6 +6,11 @@ jobs:
     runs-on: ubuntu-latest # The following are JavaScript actions (not Docker)
     env:
       working-directory: eks-cluster-with-new-vpc
+      INFRACOST_LOG_LEVEL: "debug"
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
 
     name: Run Infracost
     steps:
@@ -68,7 +73,7 @@ jobs:
           #   hide-and-new - Minimize previous comments and create a new one.
           #   new - Create a new cost estimate comment on every push.
           infracost comment github --path /tmp/infracost.json \
-                                   --repo $GITHUB_REPOSITORY \
+                                   --repo ${{ github.repository }}\
                                    --github-token ${{github.token}} \
                                    --pull-request ${{github.event.pull_request.number}} \
                                    --behavior update
