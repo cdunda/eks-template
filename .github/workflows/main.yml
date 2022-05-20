@@ -6,6 +6,9 @@ jobs:
     runs-on: ubuntu-latest # The following are JavaScript actions (not Docker)
     env:
       working-directory: eks-cluster-with-new-vpc
+    permissions:
+      id-token: write
+      contents: read
 
     name: Run Infracost
     steps:
