@@ -1,50 +1,74 @@
-name: Terraform
-on: [push]
+# The GitHub Actions docs (https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#on)
+# describe other options for 'on', 'pull_request' is a good default.
+on: [pull_request]
 jobs:
-  check-format:
-    runs-on: ubuntu-latest
-    container: hashicorp/terraform
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-      - run: terraform fmt -check -recursive -diff
-
-  validate:
-    runs-on: ubuntu-latest
-    container: hashicorp/terraform
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-      - name: Terraform Init
-        run: terraform init
-        working-directory: eks-cluster-with-new-vpc
-      - name: Terraform Validate
-        run: terraform validate
-        working-directory: eks-cluster-with-new-vpc
-
-  mock-plan:
-    runs-on: ubuntu-latest
-    container: hashicorp/terraform
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-      - name: Terraform Init
-        run: terraform init
-        working-directory: eks-cluster-with-new-vpc
-      - name: Terraform Plan (Mock)
-        run: terraform plan
-        working-directory: eks-cluster-with-new-vpc
-
   infracost:
-    runs-on: ubuntu-latest
-    name: Show infracost diff
+    runs-on: ubuntu-latest # The following are JavaScript actions (not Docker)
+    env:
+      working-directory: eks-cluster-with-new-vpc
+
+    name: Run Infracost
     steps:
       - name: Check out repository
-        uses: actions/checkout@v3
-      - name: Run infracost diff
-        uses: infracost/infracost-gh-action@master
-        env:
-          INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/checkout@v2
+
+      # Typically the Infracost actions will be used in conjunction with
+      # https://github.com/hashicorp/setup-terraform. Subsequent steps
+      # can run Terraform commands as they would in the shell.
+      - name: Install terraform
+        uses: hashicorp/setup-terraform@v1
         with:
-          path: eks-cluster-with-new-vpc 
+          terraform_wrapper: false # This is recommended so the `terraform show` command outputs valid JSON
+
+      # IMPORTANT: add any required steps here to setup cloud credentials so Terraform can run
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::026799331223:role/dunda-github-action
+          role-session-name: eks-cost-estimate
+
+      - name: Terraform init
+        run: terraform init
+        working-directory: ${{ env.working-directory }}
+
+      - name: Terraform plan
+        run: terraform plan -out tfplan.binary
+        working-directory: ${{ env.working-directory }}
+
+      - name: Terraform show
+        run: terraform show -json tfplan.binary > plan.json
+        working-directory: ${{ env.working-directory }}
+
+      # Install the Infracost CLI, see https://github.com/infracost/actions/tree/master/setup
+      # for other inputs such as version, and pricing-api-endpoint (for self-hosted users).
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v1
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      # Generate Infracost JSON output, the following docs might be useful:
+      # Multi-project/workspaces: https://www.infracost.io/docs/features/config_file
+      # Combine Infracost JSON files: https://www.infracost.io/docs/features/cli_commands/#combined-output-formats
+      - name: Generate Infracost JSON
+        run: infracost breakdown --path plan.json --format json --out-file /tmp/infracost.json
+        working-directory: ${{ env.working-directory }}
+        # Env vars can be set using the usual GitHub Actions syntax
+        # See the list of supported Infracost env vars here: https://www.infracost.io/docs/integrations/environment_variables/
+        # env:
+        #   MY_ENV: ${{ secrets.MY_ENV }}
+
+      # See https://www.infracost.io/docs/features/cli_commands/#comment-on-pull-requests for other options.
+      - name: Post Infracost comment
+        run: |
+          # Posts a comment to the PR using the 'update' behavior.
+          # This creates a single comment and updates it. The "quietest" option.
+          # The other valid behaviors are:
+          #   delete-and-new - Delete previous comments and create a new one.
+          #   hide-and-new - Minimize previous comments and create a new one.
+          #   new - Create a new cost estimate comment on every push.
+          infracost comment github --path /tmp/infracost.json \
+                                   --repo $GITHUB_REPOSITORY \
+                                   --github-token ${{github.token}} \
+                                   --pull-request ${{github.event.pull_request.number}} \
+                                   --behavior update
