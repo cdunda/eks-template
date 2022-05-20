@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest # The following are JavaScript actions (not Docker)
     env:
       working-directory: eks-cluster-with-new-vpc
-      INFRACOST_LOG_LEVEL: debug
+      INFRACOST_LOG_LEVEL: "debug"
     permissions:
       id-token: write
       contents: read
@@ -74,5 +74,5 @@ jobs:
           infracost comment github --path /tmp/infracost.json \
                                    --repo $GITHUB_REPOSITORY \
                                    --github-token ${{github.token}} \
-                                   --commit $GITHUB_SHA \
+                                   --commit "$GITHUB_SHA" \
                                    --behavior update
